@@ -19,10 +19,10 @@ from toolmaker.llm.completions import completion_factory
 from toolmaker.utils.logging import tlog
 
 MAX_COST: Final[float] = 5.0  # dollars
-LLM_MODEL: Final[str] = os.getenv("LLM_MODEL", "gpt-4o")
-LLM_MODEL_REASONING: Final[str] = os.getenv("LLM_MODEL_REASONING", "o1-mini")
+LLM_MODEL: Final[str] = os.getenv("LLM_MODEL", "gemini/gemini-pro")
+LLM_MODEL_REASONING: Final[str] = os.getenv("LLM_MODEL_REASONING", "gemini/gemini-2.5-pro")
 LLM_MODEL_SUMMARY: Final[str] = os.getenv(
-    "LLM_MODEL_SUMMARY", "gpt-4o"
+    "LLM_MODEL_SUMMARY", "gemini/gemini-pro"
 )  # for paper summary
 
 

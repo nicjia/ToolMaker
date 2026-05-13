@@ -56,7 +56,7 @@ docker pull ghcr.io/katherlab/toolmaker:cuda
 
 Also, create a `.env` file in the root directory with the following content:
 ```bash
-OPENAI_API_KEY=sk-proj-...  # your OpenAI API key (required to run toolmaker)
+GEMINI_API_KEY = ... 
 HF_TOKEN=hf_...  # your Hugging Face API key (required for some benchmark tools)
 CUDA_VISIBLE_DEVICES=0  # if you have a GPU
 ```
