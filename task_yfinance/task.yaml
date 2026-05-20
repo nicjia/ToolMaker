@@ -1,0 +1,31 @@
+name: yfinance_fetch_prices
+repo:
+  name: yfinance
+  url: https://github.com/ranaroussi/yfinance
+papers:
+  - "yfinance library for financial data retrieval"
+category: financial_data
+description: Fetch historical daily closing prices for a given stock ticker and date range.
+arguments:
+  - name: ticker
+    type: str
+    description: Stock ticker symbol (e.g., AAPL, GOOGL)
+  - name: start_date
+    type: str
+    description: Start date in YYYY-MM-DD format
+  - name: end_date
+    type: str
+    description: End date in YYYY-MM-DD format
+returns:
+  - name: prices
+    type: dict
+    description: Dictionary mapping dates to closing prices
+example:
+  name: example
+  arguments:
+    - name: ticker
+      value: "AAPL"
+    - name: start_date
+      value: "2023-01-01"
+    - name: end_date
+      value: "2023-12-31"

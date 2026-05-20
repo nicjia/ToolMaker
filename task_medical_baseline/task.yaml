@@ -1,0 +1,11 @@
+description: Calculate basic medical statistics from patient data - compute mean age and BMI across patients.
+repo: https://github.com/scikit-learn/scikit-learn
+arguments:
+  data_csv:
+    type: str
+    description: Path to CSV file with columns age, weight_kg, height_m
+    example: "/mount/input/patients.csv"
+returns:
+  stats:
+    type: dict
+    description: Dictionary with mean_age and mean_bmi

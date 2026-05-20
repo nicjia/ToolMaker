@@ -1,0 +1,26 @@
+name: riskfolio_optimal_portfolio
+repo:
+  name: Riskfolio-Lib
+  url: https://github.com/dcajasn/Riskfolio-Lib
+papers:
+  - "Riskfolio-Lib: A Python library for portfolio optimization"
+category: portfolio_optimization
+description: Calculate optimal portfolio weights to maximize the Sharpe ratio.
+arguments:
+  - name: returns_data
+    type: str
+    description: Path to CSV file containing historical returns (rows=dates, columns=assets)
+  - name: target_risk
+    type: float
+    description: Target risk level (standard deviation) for the portfolio
+returns:
+  - name: optimal_weights
+    type: dict
+    description: Dictionary mapping asset names to their optimized weights
+example:
+  name: example
+  arguments:
+    - name: returns_data
+      value: "/mount/input/returns.csv"
+    - name: target_risk
+      value: 0.1

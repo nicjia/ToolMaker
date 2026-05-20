@@ -1,0 +1,31 @@
+name: backtrader_ma_crossover_backtest
+repo:
+  name: backtrader
+  url: https://github.com/mementum/backtrader
+papers:
+  - "Backtrader framework for backtesting trading strategies"
+category: financial_backtesting
+description: Backtest a simple Moving Average Crossover strategy on historical data.
+arguments:
+  - name: data_path
+    type: str
+    description: Path to CSV file with OHLCV data (Date, Open, High, Low, Close, Volume)
+  - name: fast_ma
+    type: int
+    description: Period for the fast moving average
+  - name: slow_ma
+    type: int
+    description: Period for the slow moving average (must be greater than fast_ma)
+returns:
+  - name: final_value
+    type: float
+    description: Final portfolio value after backtest
+example:
+  name: example
+  arguments:
+    - name: data_path
+      value: "/mount/input/market_data.csv"
+    - name: fast_ma
+      value: 10
+    - name: slow_ma
+      value: 30
