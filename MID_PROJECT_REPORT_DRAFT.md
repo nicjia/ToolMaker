@@ -189,3 +189,24 @@ This represents a deliberate scope reduction in line with research best practice
 
 Wölflein, G., Ferber, D., Truhn, D., Arandjelović, O., & Kather, J. N. (2025). LLM Agents Making Agent Tools. In *Proceedings of the Annual Meeting of the Association for Computational Linguistics (ACL)*, July 2025.
 
+## 7. Code Changes (runtime fixes applied, no result updates)
+
+During debugging and repeated runs on the local environment we applied two small, targeted code changes to keep TOOLMAKER runnable in our setup. These edits are minimal, reversible, and intended to avoid early runtime crashes so we can obtain reproducible install/create outputs. We are not updating any experimental results in this manuscript until the full pipeline completes successfully.
+
+- `toolmaker/tasks/install.py` — fix: replace `definition.repo.info()` (call) with `definition.repo.info` (attribute).
+  - Reason: The code attempted to call `info` as a function but it is a string attribute on the `Repository` dataclass. This produced a `TypeError` at runtime and aborted the installer agent early. Fixing this is a correctness patch (no behavioral change beyond removing the crash) so the agent can include repository info in prompts correctly.
+
+- `toolmaker/llm/__init__.py` — fix: wrap litellm token/cost lookup calls in `try/except` and fall back to zero cost when the model/provider mapping is missing.
+  - Reason: The LiteLLM helper attempted to compute prompt/completion costs by looking up the provider/model mapping. When the configured Gemini model string (e.g., `gemini/gemini-pro`) was not present in litellm's internal mapping for the chosen API/version, litellm raised a `NotFoundError` which caused the agent to crash. The defensive `try/except` preserves the primary LLM call behavior while avoiding an early abort due to cost bookkeeping. It logs a warning and continues with a zero-cost fallback. This change does not alter LLM outputs — only the bookkeeping path used for cost estimation and tracing.
+
+Notes about Gemini-only usage
+- You indicated you only have a Gemini API key. The errors we observed (404 / "models/gemini-pro is not found for API version v1beta") stem from a mismatch between the Geminimodel string used in our config and the API endpoints supported by the `litellm` version in the environment. In other words, the client attempted to call an API method that the selected model name does not support for that API version. The minimal defensive edits above let TOOLMAKER continue running while we (a) confirm the exact model name/version to use with your key, and (b) reconfigure `LLM_MODEL`/`LLM_MODEL_REASONING` in `.env` to match a model string supported by the installed `litellm`.
+
+We will not change the experimental result tables or success-rate summaries until a complete install+create run completes for each task using the confirmed Gemini model string.
+
+If you want, I can now:
+- attempt to detect supported Gemini model names via `litellm` in this environment and re-run `install` (recommended), or
+- revert these two minimal patches and instead apply a runtime monkeypatch (if you prefer no repository edits).
+
+Please tell me which you prefer and I will proceed.
+

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+import time
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -19,6 +21,7 @@ from toolmaker.llm.completions import completion_factory
 from toolmaker.utils.logging import tlog
 
 MAX_COST: Final[float] = 5.0  # dollars
+MAX_LLM_RETRIES: Final[int] = int(os.getenv("LLM_MAX_RETRIES", "6"))
 LLM_MODEL: Final[str] = os.getenv("LLM_MODEL", "gemini/gemini-pro")
 LLM_MODEL_REASONING: Final[str] = os.getenv("LLM_MODEL_REASONING", "gemini/gemini-2.5-pro")
 LLM_MODEL_SUMMARY: Final[str] = os.getenv(
@@ -135,12 +138,25 @@ class LLM:
         tools: Sequence[ChatCompletionToolParam] | None = None,
     ) -> ParsedChatCompletionMessage[T]:
         is_typed = response_format is not None
+        provider_response_format = response_format if is_typed else None
+        # Gemini currently rejects tool calling + application/json response_mime_type.
+        # Fall back to local parsing when typed output is requested alongside tools.
+        if is_typed and tools and model.startswith("gemini/"):
+            provider_response_format = None
+            logger.warning(
+                f"Disabling provider response_format for {model} when tools are enabled; "
+                "falling back to local JSON parsing."
+            )
         prompt_tokens = litellm.token_counter(
             model=model,
             messages=messages,
             tools=tools,
         )
-        prompt_cost = litellm.completion_cost(model=model, messages=messages)
+        try:
+            prompt_cost = litellm.completion_cost(model=model, messages=messages)
+        except Exception as e:  # model may be unmapped in litellm cost table
+            logger.warning(f"Could not compute prompt cost for {model}: {e}")
+            prompt_cost = 0.0
         with tlog.context(
             "llm_call",
             model=model,
@@ -155,14 +171,52 @@ class LLM:
             # print("MESSAGES:", json.dumps(list(messages)))
             # print("TOOLS:", json.dumps(tools))
 
-            response = completion_factory(model)(
-                model=model,
-                messages=list(messages),
-                tools=tools,
-                response_format=response_format if is_typed else None,
-            )
+            response = None
+            for attempt in range(MAX_LLM_RETRIES):
+                try:
+                    response = completion_factory(model)(
+                        model=model,
+                        messages=list(messages),
+                        tools=tools,
+                        response_format=provider_response_format,
+                    )
+                    break
+                except Exception as e:
+                    error_text = str(e)
+                    retriable = any(
+                        marker in error_text
+                        for marker in (
+                            "RateLimitError",
+                            "ServiceUnavailable",
+                            '"code": 429',
+                            '"code": 503',
+                            "RESOURCE_EXHAUSTED",
+                            "UNAVAILABLE",
+                        )
+                    )
+                    is_last = attempt >= MAX_LLM_RETRIES - 1
+                    if not retriable or is_last:
+                        raise
+
+                    delay_seconds = min(60, 2**attempt)
+                    first_line = (
+                        error_text.splitlines()[0] if error_text else type(e).__name__
+                    )
+                    logger.warning(
+                        f"Transient LLM error for {model} "
+                        f"(attempt {attempt + 1}/{MAX_LLM_RETRIES}). "
+                        f"Retrying in {delay_seconds}s. Error: {first_line}"
+                    )
+                    time.sleep(delay_seconds)
+
+            if response is None:
+                raise RuntimeError("LLM completion failed without a response.")
             message = response.choices[0].message
-            completion_cost = litellm.completion_cost(response)
+            try:
+                completion_cost = litellm.completion_cost(response)
+            except Exception as e:
+                logger.warning(f"Could not compute completion cost: {e}")
+                completion_cost = 0.0
             usage = Usage.from_litellm(response.usage)
             self.tokens[model] += usage
             self.cost[model] += completion_cost
@@ -183,14 +237,74 @@ class LLM:
         if is_typed:
             message.refusal = None
             try:
-                return (
-                    parse_chat_completion(
-                        response_format=cast(type[T], response_format),
-                        chat_completion=response,
-                        input_tools=tools or [],
+                if provider_response_format is not None:
+                    return (
+                        parse_chat_completion(
+                            response_format=cast(type[T], response_format),
+                            chat_completion=response,
+                            input_tools=tools or [],
+                        )
+                        .choices[0]
+                        .message
                     )
-                    .choices[0]
-                    .message
+
+                # Fallback path for providers/models that don't support typed
+                # response format when tool calling is enabled.
+                if message.tool_calls:
+                    # Intermediate agent turns often return only tool calls.
+                    # Keep parsed=None so the agent continues stepping.
+                    return ParsedChatCompletionMessage(
+                        **message.model_dump(),
+                        parsed=None,
+                    )
+
+                content = message.content or ""
+                parsed: T
+                try:
+                    parsed = cast(type[T], response_format).model_validate_json(content)
+                except Exception:
+                    # Try extracting a JSON object from fenced or mixed text.
+                    match = re.search(r"\{[\s\S]*\}", content)
+                    if match:
+                        parsed = cast(type[T], response_format).model_validate_json(
+                            match.group(0)
+                        )
+                    else:
+                        # Last-resort coercion call: ask the same model to
+                        # convert free-form text to the required typed JSON.
+                        schema = cast(type[T], response_format).model_json_schema()
+                        coercion_messages: list[ChatCompletionMessageParam] = [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Convert the provided text into a valid JSON object "
+                                    "that matches the provided schema. Return only JSON."
+                                ),
+                            },
+                            {
+                                "role": "user",
+                                "content": f"Schema:\n{schema}\n\nText:\n{content}",
+                            },
+                        ]
+                        coerced = completion_factory(model)(
+                            model=model,
+                            messages=coercion_messages,
+                            tools=None,
+                            response_format=response_format,
+                        )
+                        coerced_content = coerced.choices[0].message.content or ""
+                        parsed = cast(type[T], response_format).model_validate_json(
+                            coerced_content
+                        )
+                        if parsed is None:
+                            raise RuntimeError(
+                                "Expected JSON response for typed output, but none was found. "
+                                f"Raw response: {content}"
+                            )
+
+                return ParsedChatCompletionMessage(
+                    **message.model_dump(),
+                    parsed=parsed,
                 )
             except ValidationError as e:
                 raise RuntimeError(

@@ -38,7 +38,7 @@ class RunBashCommand(Action):
     action = "run_bash_command"
     command: str = Field(..., description="The bash command to run.")
     env: Sequence[EnvironmentVariable] = Field(
-        default_factory=(),
+        default_factory=list,
         description="Additional environment variables to set before running the command (only visible to the bash command). Do NOT set environment variables here that you want to use from the system instead.",
     )
 

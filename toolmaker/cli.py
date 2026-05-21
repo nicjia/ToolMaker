@@ -26,6 +26,9 @@ from toolmaker.utils.paths import BENCHMARK_DIR, TOOL_DOCKERFILE, TOOLS_DIR
 
 app = typer.Typer()
 
+# Load local .env so CLI runs use the same API/model settings documented in README.
+dotenv.load_dotenv()
+
 
 @app.command()
 def install(
@@ -89,6 +92,7 @@ def install(
         f"install-{friendly_name(run_name)}",
         image=f"ghcr.io/katherlab/toolmaker:{definition.requires}",
         env=env,
+        timeout=60.0,
     )
     with tlog.log_to(install_folder / "logs.jsonl"):
         installed_state = install_repository(

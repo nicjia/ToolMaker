@@ -62,7 +62,7 @@ def install_repository(
 
     user_prompt = f"""Clone and locally set up the {definition.repo.name} repository from GitHub.
 Follow these steps:
-1. Git clone the repository {definition.repo.info()} into the directory `{install_path}`.
+1. Git clone the repository {definition.repo.info} into the directory `{install_path}`.
 2. Check the README (find it if it is not in the root directory) and closely follow the recommended instructions to set up the entire repository correctly for the user.
 3. Follow the instructions in the README to correctly set up the repository for the user. Perform any necessary installations, configurations, downloads or setups as described. If the repository is in Python, prefer using `pip` as opposed to conda, virtualenv, or similar. Install the repository and its dependencies globally. Do not use Docker or similar container tools (even if the README suggests it); instead, install the repository and its dependencies globally.
 4. Make sure that you complete every step, so that a user could directly use this repository without the need to do further setups, installations or downloads. This includes downloading any necessary pretrained models. However, do NOT download any datasets.
