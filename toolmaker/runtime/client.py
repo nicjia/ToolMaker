@@ -68,6 +68,7 @@ class DockerRuntimeClient(ToolArenaDockerRuntimeClient, RuntimeClient):
             name,
             image=f"{image}:{tag}",
             mounts=mounts,
-            gpus=gpus,
+            cuda=bool(gpus),
             env=env,
+            timeout=30.0,
         )

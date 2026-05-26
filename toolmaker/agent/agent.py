@@ -79,7 +79,7 @@ class Agent[T: (BaseModel | str)]:
             # will throw an error. To fix this, we set the tool call list to None.
             message.tool_calls = None
 
-        state >>= cast(ChatCompletionMessageParam, message.model_dump())
+        state >>= cast(ChatCompletionMessageParam, message.model_dump(exclude={"parsed"}))
 
         for call in message.tool_calls or []:
             action_type: type[Action] = self.actions[call.function.name]
@@ -161,6 +161,6 @@ def completion_step[T: BaseModel | str](
     response = completion(messages=state.messages)
     state >>= cast(
         ChatCompletionAssistantMessageParam,
-        dict(role="assistant", content=response.parsed),
+        dict(role="assistant", content=response.content),
     )
     return state.with_response(map_result(response.parsed))

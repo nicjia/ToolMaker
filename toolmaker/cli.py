@@ -176,9 +176,15 @@ def create_tool(
             raise RuntimeError(
                 f"Tool folder {tool_folder} already exists. Use --force to overwrite."
             )
-        logger.warning(f"Tool folder {tool_folder} already exists. Deleting it.")
-        rmdir(tool_folder)
+        logger.warning(f"Tool folder {tool_folder} already exists. Emptying it.")
+        import shutil
+        for child in tool_folder.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
     tool_folder.mkdir(parents=True, exist_ok=True)
+    import time; time.sleep(2.0)
 
     # Copy YAML files
     task_file = tool_folder / "task.yaml"

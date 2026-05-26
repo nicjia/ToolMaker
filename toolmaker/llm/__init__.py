@@ -21,12 +21,18 @@ from toolmaker.llm.completions import completion_factory
 from toolmaker.utils.logging import tlog
 
 MAX_COST: Final[float] = 5.0  # dollars
-MAX_LLM_RETRIES: Final[int] = int(os.getenv("LLM_MAX_RETRIES", "6"))
+MAX_LLM_RETRIES: Final[int] = int(os.getenv("LLM_MAX_RETRIES", "15"))
 LLM_MODEL: Final[str] = os.getenv("LLM_MODEL", "gemini/gemini-pro")
 LLM_MODEL_REASONING: Final[str] = os.getenv("LLM_MODEL_REASONING", "gemini/gemini-2.5-pro")
 LLM_MODEL_SUMMARY: Final[str] = os.getenv(
     "LLM_MODEL_SUMMARY", "gemini/gemini-pro"
 )  # for paper summary
+
+# Configure Vertex AI project/location if specified in environment
+if os.getenv("VERTEX_PROJECT"):
+    litellm.vertex_project = os.getenv("VERTEX_PROJECT")
+if os.getenv("VERTEX_LOCATION"):
+    litellm.vertex_location = os.getenv("VERTEX_LOCATION")
 
 
 class LLMCall[T: BaseModel | str](Protocol):
@@ -141,7 +147,7 @@ class LLM:
         provider_response_format = response_format if is_typed else None
         # Gemini currently rejects tool calling + application/json response_mime_type.
         # Fall back to local parsing when typed output is requested alongside tools.
-        if is_typed and tools and model.startswith("gemini/"):
+        if is_typed and tools and (model.startswith("gemini/") or model.startswith("vertex_ai/")):
             provider_response_format = None
             logger.warning(
                 f"Disabling provider response_format for {model} when tools are enabled; "
@@ -198,7 +204,13 @@ class LLM:
                     if not retriable or is_last:
                         raise
 
+                    # Parse server-suggested retry delay if present
                     delay_seconds = min(60, 2**attempt)
+                    retry_match = re.search(r'"retryDelay":\s*"(\d+)', error_text)
+                    if retry_match:
+                        delay_seconds = int(retry_match.group(1)) + 5  # server delay + buffer
+                    elif '429' in error_text or 'RESOURCE_EXHAUSTED' in error_text:
+                        delay_seconds = max(delay_seconds, 40)  # min 40s for rate limits
                     first_line = (
                         error_text.splitlines()[0] if error_text else type(e).__name__
                     )
@@ -263,13 +275,18 @@ class LLM:
                 try:
                     parsed = cast(type[T], response_format).model_validate_json(content)
                 except Exception:
-                    # Try extracting a JSON object from fenced or mixed text.
                     match = re.search(r"\{[\s\S]*\}", content)
+                    success = False
                     if match:
-                        parsed = cast(type[T], response_format).model_validate_json(
-                            match.group(0)
-                        )
-                    else:
+                        try:
+                            parsed = cast(type[T], response_format).model_validate_json(
+                                match.group(0)
+                            )
+                            success = True
+                        except Exception:
+                            pass
+                    
+                    if not success:
                         # Last-resort coercion call: ask the same model to
                         # convert free-form text to the required typed JSON.
                         schema = cast(type[T], response_format).model_json_schema()

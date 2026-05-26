@@ -22,6 +22,8 @@ def pydantic_to_function_schema(
 
 def process_llm_code_output(code: str) -> str:
     """Process the output of an LLM call to remove any markdown code blocks if it is enclosed in them."""
+    if code is None:
+        return ""
     code = code.strip()
     if code.startswith("```python") and code.endswith("```"):
         code = code[len("```python") : -len("```")]

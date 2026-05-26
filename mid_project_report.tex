@@ -1,0 +1,224 @@
+\documentclass[11pt]{article}
+
+% Change "review" to "final" to generate the final (sometimes called camera-ready) version.
+% Change to "preprint" to generate a non-anonymous version with page numbers.
+\usepackage[final]{acl}
+
+% Standard package includes
+\usepackage{times}
+\usepackage{latexsym}
+
+% For proper rendering and hyphenation of words containing Latin characters (including in bib files)
+\usepackage[T1]{fontenc}
+
+% This assumes your files are encoded as UTF8
+\usepackage[utf8]{inputenc}
+
+% This will improve the layout of the manuscript
+\usepackage{microtype}
+
+% Improve typewriter font aesthetics
+\usepackage{inconsolata}
+
+% For including images
+\usepackage{graphicx}
+
+\usepackage{float}
+
+% For code listings and verbatim
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  language=Python,
+  numbers=none
+}
+
+\title{Quant-Bench: Evaluating TOOLMAKER's Generalization to Financial Software}
+
+\author{Nicholas Jiang, Connor Wang, Amal Padhye \\
+  University of California, Los Angeles}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This project, Quant-Bench, evaluates the TOOLMAKER framework's ability to generalize to quantitative finance by establishing a benchmark of three financial repositories. We report on our infrastructure setup, environment configuration, and the iterative resolution of compatibility issues between the TOOLMAKER orchestration logic and the Gemini free-tier API.
+\end{abstract}
+
+\section{Introduction}
+
+Recent work in autonomous software engineering has demonstrated the potential for LLM-based agents to generate functional code from high-level task descriptions. TOOLMAKER achieves an 80\% success rate on diverse scientific tasks spanning medical imaging and computational biology. However, the generalization of TOOLMAKER to specialized domains outside its original benchmark remains unexplored.
+
+This project investigates whether TOOLMAKER can successfully generate tools from repositories in the quantitative finance industry. This domain presents unique challenges characterized by complex mathematical transformations, such as portfolio optimization and risk calculations, as well as real-time data handling with strict latency requirements. Financial software also demands strict adherence to domain-specific correctness constraints, including accurate calculations and data integrity, while heavily relying on specialized and ever-changing external libraries and APIs.
+
+In our follow-up project, \textbf{Quant-Bench}, we establish a benchmark of three financial software engineering tasks derived from popular, well-maintained repositories. Our primary objectives are to measure TOOLMAKER's success rate on these financial domain tasks and to identify the specific challenges inherent in financial software generation. By comparing results against the original medical and scientific benchmark, we aim to identify the infrastructure requirements and compatibility constraints necessary to adapt the agentic framework to quantitative finance. 
+
+\section{Methodology}
+
+\subsection{Task Selection and Experimental Design}
+
+We curated three financial software repositories representing distinct sub-domains of quantitative finance, as detailed in Table \ref{tab:tasks}.
+
+\begin{table}[htbp]
+  \centering
+  \resizebox{\columnwidth}{!}{%
+  \begin{tabular}{lllll}
+    \hline
+    \textbf{Repository} & \textbf{Task} & \textbf{Input} & \textbf{Output} & \textbf{Domain} \\
+    \hline
+    yfinance & Fetch prices & ticker, dates & daily prices & Data retrieval \\
+    backtrader & Backtest & OHLCV, MAs & final value & Backtesting \\
+    Riskfolio-Lib & Optimize & returns, risk & weights & Optimization \\
+    \hline
+  \end{tabular}%
+  }
+  \caption{Quant-Bench tasks.}
+  \label{tab:tasks}
+\end{table}
+
+For each task, we first defined the parameters using the ToolArena YAML schema. This required specifying the repository URL and metadata, which includes describing the input and output argument specifications along with their respective types and descriptions. Example invocations were also provided to help demonstrate the expected behavior. 
+
+Following task definition, we configured the underlying LLM backend. We utilized a LiteLLM proxy to route requests to the Gemini API, specifically leveraging the \texttt{gemini-2.5-flash} model for standard generation and \texttt{gemini-2.5-pro} for reasoning tasks, authenticated via a standard environment configuration. 
+
+Finally, we prepared the Docker execution environment. TOOLMAKER relies on containerized environments to isolate and safely test the generated code. We utilized the official TOOLMAKER Docker images (\texttt{ghcr.io/katherlab/toolmaker:cpu}) and configured the necessary timeout thresholds, resource limits, and runtime parameters to accommodate the specific networking and computational needs of the financial libraries.
+
+\subsection{Benchmark Definition}
+
+In order to evaluate the agent's performance, we establish several primary criteria for the \textbf{Quant-Bench} evaluation. First, we assess the success of tool generation by verifying that the generated code runs without error and returns the correct data types. Then, we measure robustness by testing how well the generated code handles edge cases, such as empty data or invalid inputs. In addition, we enforce a latency constraint, ensuring that the total tool creation time remains under ten minutes to adhere to the API quota budgets. Finally, we ensure schema validation by confirming that all of the generated task definitions conform to the underlying ToolArena specification. 
+
+
+\section{Progress and Preliminary Results}
+
+\subsection{Environment Setup Status}
+
+We achieved several goals in the environment setup process. Task definition files were successfully created for all three repositories using the correct ToolArena schema. The Gemini free-tier API key was configured in the \texttt{.env} file, and the LiteLLM library was integrated to provide Gemini API access through an OpenAI-compatible wrapper. In addition, all repository URLs were verified to be accessible, and every \texttt{task.yaml} file passed schema validation successfully.
+
+
+\subsection{Execution Attempt and Challenges Encountered}
+
+We executed TOOLMAKER's two-phase pipeline:
+\begin{lstlisting}[language=bash]
+# Phase 1: Environment installation
+uv run python -m toolmaker install task_yfinance --name yfinance_tool --force
+
+# Phase 2: Tool creation (uses LLM to generate code)
+uv run python -m toolmaker create task_yfinance --name yfinance_tool --force
+\end{lstlisting}
+
+The installation phase went through multiple agent steps, including repository cloning, dependency resolution, and environment setup. However, execution encountered an rate limiting issue with the Gemini free-tier API (20 requests/day limit for \texttt{gemini-2.5-flash}), which prevented final state serialization.
+
+\subsection{Schema Validation and Intermediate Milestones}
+
+Despite the execution issues, several intermediate goals were successfully achieved. All three \texttt{task.yaml} files passed ToolArena schema validation, confirming that the task definitions followed the required structure. Additionally, the example calls correctly specified argument types and values, showing that the task configurations were consistent with the expected requirements.
+
+
+Example task definition (yfinance):
+\begin{lstlisting}[language=yaml]
+name: yfinance_fetch_prices
+repo:
+  name: yfinance
+  url: https://github.com/ranaroussi/yfinance
+category: financial_data
+description: Fetch historical daily closing prices 
+  for a given stock ticker and date range.
+arguments:
+  - name: ticker
+    type: str
+    description: Stock ticker symbol (e.g., AAPL, GOOGL)
+  - name: start_date
+    type: str
+    description: Start date in YYYY-MM-DD format
+\end{lstlisting}
+
+\section{Challenges and Mitigations}
+
+\subsection{Gemini API Incompatibilities}
+
+\textbf{Challenge:} Gemini API rejects the combined use of tool-calling and typed response formats such as \texttt{response\_format=application/json}.
+
+\textbf{Root Cause:} Gemini's API returns a 400 error when both the \texttt{tools} parameter and the \texttt{response\_format} parameter are specified in the same completion request. This behavior differs from OpenAI's API, which supports the simultaneous use of both features.
+
+\textbf{Mitigation Applied:} To address this issue, the implementation conditionally disables provider-side response formatting whenever tools are present in the request. Instead of relying on provider-side typed responses, the system falls back to local Pydantic-based JSON parsing. These custom modifications were deployed on a dedicated fork of the TOOLMAKER repository to cleanly override the hardcoded API behavior.
+
+
+
+\subsection{Pydantic Schema Default Factory Issues}
+
+\textbf{Challenge:} Validation of the \texttt{RunBashCommand} action failed with a ``Field required'' error on the optional \texttt{env} field.
+
+\textbf{Root Cause:} The schema incorrectly used an invalid tuple literal, \texttt{default\_factory=()}, instead of a callable list factory.
+
+\textbf{Mitigation:} The implementation was updated to use \texttt{default\_factory=list}, which allows Pydantic to instantiate an empty list automatically when Gemini tool calls omit optional fields.
+
+\subsection{Docker Runtime Timeout}
+
+\textbf{Challenge:} A runtime error stating ``Runtime client did not become ready after 10.0 seconds'' occurred despite successful container startup.
+
+\textbf{Root Cause:} On macOS, the Docker container required approximately 30--40 seconds for the Uvicorn application to complete startup, while the original timeout threshold was set to only 10 seconds.
+
+\textbf{Mitigation:} The timeout value in the \texttt{DockerRuntimeClient.create()} call was increased to 60 seconds to account for the slower startup.
+
+\subsection{Free-Tier API Quota}
+
+\textbf{Challenge:} The Gemini free-tier API has a limit of 20 requests per day for each model, and this limit was exhausted during debugging iterations.
+
+\textbf{Current Status:} The quota limit was reached during attempt 6 of the install-and-test cycle. Each installation attempt used about 5--8 language model requests in addition to retry backoff requests.
+
+\textbf{Mitigation Strategy:} The immediate fix is to wait for the quota reset the next day. API usage is also being monitored through the Google Cloud Console dashboard. For future development, upgrading to a paid tier or switching to an alternative provider is being considered to avoid quota issues.
+
+\section{Timeline and Contributions}
+
+\subsection{Project Timeline}
+
+\begin{table}[htbp]
+  \centering
+  % Option 1: Shrinks the table to exactly the width of the column
+  \resizebox{\columnwidth}{!}{%
+  \begin{tabular}{lll}
+    \hline
+    \textbf{Phase} & \textbf{Target Dates} & \textbf{Status} \\
+    \hline
+    Phase 1: Planning & Apr 29 -- May 6 & \checkmark~Complete \\
+    Phase 2: Setup & May 7 -- May 13 & \checkmark~Complete \\
+    Phase 3: Baseline Runs & May 14 -- May 18 & \checkmark~Complete \\
+    Phase 4: Run Benchmarks& May 19 -- May 26 & Pending  \\
+    Phase 5: Final Writeup& May 27 -- June 2 & Planned \\
+    \hline
+  \end{tabular}%
+  } % Closes the resizebox
+  \caption{Quant-Bench project timeline and completion status.}
+  \label{tab:timeline}
+\end{table}
+
+\subsection{Individual Contributions}
+
+\begin{table}[H]
+  \centering
+  \small % slightly reduces font size to help fit the column
+  % Option 2: p{3.5cm} forces the middle column to wrap text at 3.5cm wide
+  \begin{tabular}{l p{3.5cm} l}
+    \hline
+    \textbf{Member} & \textbf{Responsibilities} & \textbf{Contribution} \\
+    \hline
+    Amal Padhye & Repository creation; task design; documentation& 33\% \\
+    Connor Wang & Docker and LiteLLM config; infrastructure setup; API key management& 33\% \\
+    Nicholas Jiang & Pipeline debugging; report drafting; LLM integration testing & 33\% \\
+    \hline
+  \end{tabular}
+  \caption{Individual contributions to Quant-Bench project.}
+  \label{tab:contributions}
+\end{table}
+\vspace{1em}
+
+\section{Scope Adjustments}
+Our presentation proposed testing five representative financial repositories; however, we adjusted the scope to three focus repositories. This deliberate reduction ensures high-quality, reproducible task definitions within API quota constraints, provides sufficient time to diagnose infrastructure issues, and allows for clear analysis of success patterns without diluting effort. This aligns with research best practices: it is better to deeply understand three well-specified tasks than to shallowly sample five with limited API quotas.
+
+\section{Continuation Plan}
+Our immediate next steps are to re-run the \texttt{yfinance} install command, complete final state serialization, and generate \texttt{install.sh}. We will then proceed with the \texttt{create} phase to generate the Python tool code, and repeat this pipeline for both \texttt{backtrader} and \texttt{Riskfolio-Lib}, documenting all outcomes. 
+
+Our final validation metrics will focus on testing whether the coercion fallback produces valid JSON schemas, verifying that the generated code creates correct types while handling plausible edge cases, and comparing our financial domain error rates against the original medical and scientific benchmarks.
+
+\end{document}
