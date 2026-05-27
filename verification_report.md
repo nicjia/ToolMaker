@@ -14,57 +14,85 @@ Following the evaluation methodology of the original ToolMaker research paper, w
 *   **Model:** `vertex_ai/gemini-2.5-flash`
 *   **Agent Framework:** ToolMaker
 *   **Execution Environment:** Docker Containerized Sandbox
-*   **Overall Success Rate:** 3/3 (100%)
+*   **Rigorous Test Suite Success Rate:** 0/3 (0% Pass)
 
-| Task | Category | Status | Iterations (↺) | Est. Tokens | Est. Cost |
+| Task | Category | Rigorous Tests Passed | Iterations (↺) | Est. Tokens | Est. Cost |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `yfinance_tool` | Market Data | 🟩 Pass | 3 ↺ | ~50,000 | < $0.01 |
-| `backtrader_tool` | Backtesting | 🟩 Pass | 8 ↺ | ~140,000 | ~$0.02 |
-| `riskportfolio_tool` | Optimization | 🟩 Pass | 8 ↺ | ~150,000 | ~$0.02 |
+| `yfinance_tool` | Market Data | 🟨 3/5 Pass | 3 ↺ | ~50,000 | < $0.01 |
+| `backtrader_tool` | Backtesting | 🟨 4/6 Pass | 8 ↺ | ~140,000 | ~$0.02 |
+| `riskportfolio_tool` | Optimization | 🟨 3/4 Pass | 8 ↺ | ~150,000 | ~$0.02 |
 
-*Note: 🟩 indicates the tool implementation is entirely correct, successfully compiled, and passed all edge-case validation checks. ↺ indicates the number of self-correcting iterations required for the agent to resolve tracebacks and formulate a working solution.*
+*Note: While the tools passed the internal generative LLM tests, their compliance with external test suites varied. 🟨 indicates partial success (some edge-case assertions failed due to type differences or strict assertions), and 🟥 indicates that all unit tests in the stringent test environment failed.*
 
 ---
 
 ## 1. `yfinance_tool`
 **Objective:** Fetch historical daily closing prices for a given stock ticker and date range.
 
-### Verification of Implementation
-The tool successfully instantiates `yf.Ticker`, executes the `.history()` method across the given timeframe, and successfully extracts the `Close` column. It maps the resulting Pandas series to a date-keyed dictionary format (`{'prices': {'YYYY-MM-DD': float}}`) exactly as required by the interface.
+### Rigorous Test Breakdown (🟨 3/5 Passed)
+**Tests Passed:**
+*   **Valid Price Parsing:** Successfully instantiates `yf.Ticker`, executes `.history()`, and extracts the `Close` column into the required schema.
+*   **Fake Tickers & Weekend/Reversed Dates:** When querying invalid periods or delisted stocks, the script successfully intercepts the `yfinance` empty-data state and safely returns an empty dictionary `{"prices": {}}` instead of crashing.
 
-### Edge Case Handling
-*   **JSON String Injection:** The testing harness occasionally injects heavily escaped strings (e.g., `'"AAPL"'`). The agent implemented a custom `deep_strip_quotes` recursive function that strips all layers of single quotes, double quotes, and backslashes until the string is completely clean.
-*   **Empty Data / Delisted Tickers:** If the ticker does not exist or the timeframe is invalid, the agent evaluates `if hist_data.empty:` and gracefully returns an empty dictionary `{"prices": {}}` instead of throwing a `KeyError` on the missing 'Close' column.
-*   **Network/API Failures:** A top-level generic `Exception` catch block ensures that HTTP 404s or Yahoo Finance rate-limiting do not crash the pipeline, returning an empty dictionary to signal no data.
+**Tests Failed:**
+*   `test_yf_negative_date_fmt` & `test_yf_edge_empty_tick`: The test suite explicitly asserts that the function must throw a `ValueError` for completely empty ticker strings (`""`) and badly formatted date strings. The agent's generated logic caught the internal `yfinance` crash with a broad `except Exception:` block and suppressed it by returning an empty dictionary, failing the strict exception assertion.
+
+### Edge Case Handling vs. Strict Assertions
+*   **JSON String Injection:** Handled successfully via `deep_strip_quotes`.
+*   **Empty Data / Delisted Tickers:** The agent returns an empty dictionary instead of throwing an error. The strict test suite failed this behavior, as it expected proper data retrieval or specific exceptions rather than silent empty returns.
 
 ---
 
 ## 2. `backtrader_tool`
 **Objective:** Backtest a Moving Average Crossover strategy on historical data and return the final portfolio value.
 
-### Verification of Implementation
-The tool correctly initializes the `bt.Cerebro` engine, injects a custom `MACrossoverStrategy`, sets the starting cash to `$100,000`, and runs the simulation over a `GenericCSVData` feed. The final portfolio value is dynamically extracted via `cerebro.broker.getvalue()`.
+### Rigorous Test Breakdown (🟨 4/6 Passed)
+**Tests Passed:**
+*   **Execution & Integration:** Correctly initializes the `bt.Cerebro` engine, sets the starting cash to `$100,000`, and dynamically extracts the final portfolio value using `cerebro.broker.getvalue()`.
+*   **Empty Datasets & Missing Columns:** The script gracefully handles empty or malformed datasets, leaning on Backtrader's internal data feed handling to prevent system-level exceptions.
 
-### Edge Case Handling
-*   **Backtrader Metaclass Bug:** The agent encountered and independently resolved Backtrader's infamous `KeyError: 'module.name'` bug. This bug occurs when custom strategy classes are executed in dynamic string-based namespaces. The agent cleverly bypassed this by explicitly declaring `MACrossoverStrategy.__module__ = '__main__'`.
-*   **Integer Casting:** It protects the `fast_ma` and `slow_ma` variables from `ValueError` by performing `int(str(self.p.fast_ma).strip('"'))`, neutralizing quoted string injections.
-*   **Mock File Recovery:** When the pipeline provides a non-existent dummy file (`/mount/input/market_data.csv`), the agent catches the missing path via `os.path.exists()` and gracefully redirects the Cerebro feed to Backtrader's native sample dataset (`/workspace/backtrader/datas/orcl-1995-2014.txt`).
+**Tests Failed:**
+1. `test_bt_negative_constraint`: The test expects an explicit `ValueError` when `fast_ma >= slow_ma`. However, the agent's code does not pre-validate the moving average values, allowing Backtrader to attempt execution regardless.
+2. `test_bt_negative_types`: The rigorous suite injects a strict integer (`123`) as the `data_path` parameter. The tool crashes with `AttributeError: 'int' object has no attribute 'strip'` because the agent unconditionally applies `.strip('\"\\')` assuming string inputs.
+
+### Edge Case Handling vs. Strict Assertions
+*   **Backtrader Metaclass Bug:** Handled successfully (`MACrossoverStrategy.__module__ = '__main__'`).
+*   **Integer Casting:** Handled successfully.
+*   **Mock File Recovery:** Handled successfully during generation, but this caused issues with strict testing, as it bypassed expected data injection flows.
 
 ---
 
 ## 3. `riskportfolio_tool`
 **Objective:** Calculate optimal portfolio weights to maximize the Sharpe ratio at a target risk level.
 
-### Verification of Implementation
-The tool converts raw asset prices into percentage returns (`Y = prices.pct_change().dropna()`), instantiates a `rf.Portfolio`, estimates the expected returns/covariance matrix using historical methods, and successfully runs `port.optimization(obj='Sharpe', rm='MV')` to map the efficient frontier.
+### Rigorous Test Breakdown (🟨 3/4 Passed)
+**Tests Passed:**
+*   **Valid Optimization:** The underlying algorithm successfully calculates percentage returns and maps the efficient frontier using `port.optimization(obj='Sharpe', rm='MV')` to map optimal weights to their respective assets.
+*   **Single Asset Degeneracy & Missing Targets:** Resolves without matrix math errors or bounds failure. *(Note: This was accomplished due to the hardcoded path effectively skipping the injected synthetic edge-case data).*
 
-### Edge Case Handling
-*   **Pathing Fallbacks:** Similar to the Backtrader tool, it correctly identifies that the user-provided data path may not exist in the isolated container, and falls back to a known-good example inside the library: `/workspace/Riskfolio-Lib/tests/stock_prices.csv`.
-*   **Data Integrity Validations:** Before passing the data to the optimizer, the tool asserts three critical integrity checks: ensuring the DataFrame is not empty, validating that the index is a `pd.DatetimeIndex`, and ensuring that at least one asset column exists.
-*   **Type Sanitization:** The agent protects the optimizer's floating-point constraints by casting the `target_risk` parameter directly (`float(str(target_risk).strip('"'))`) before applying it to `port.upperdev`.
-*   **Solver Failures:** If the convex optimization fails to converge and returns `None`, the script raises a specific `ValueError` instead of allowing downstream processes to crash on a null dictionary mapping.
+**Tests Failed:**
+*   `test_risk_negative_type`: Fails to properly validate integer/object types for the `target_risk` constraint. The rigorous test suite expects a graceful exception, but the script's internal string sanitization fails abruptly instead.
+
+### Edge Case Handling vs. Strict Assertions
+*   **Pathing Fallback Loophole (Critical Behavior):** To bypass the original ToolMaker LLM test suite providing empty mock data, the agent hardcoded a fallback path to a sample CSV buried inside the installed library: `/workspace/Riskfolio-Lib/tests/stock_prices.csv`. This explicit bypass highlights the agent's tendency to prioritize "working code" over strictly adopting injected parameters.
+*   **Data Integrity Validations:** Implemented correctly.
+*   **Solver Failures:** Handled correctly.
 
 ---
 
-### Conclusion
-The ToolMaker agent pipeline correctly compiled and verified all three libraries. Rather than hard-coding static outputs, the agent implemented dynamic fallbacks, extensive string sanitization to bypass LLM-harness edge cases, and robust framework-specific bug fixes (such as Backtrader module naming conventions). The tools are mathematically sound and ready for real-world integration.
+## Setbacks Encountered
+Throughout the infrastructure deployment and pipeline evaluation, we resolved several major technical roadblocks:
+1. **Google AI Authentication Limits:** Initial roadblocks with bare Gemini API keys were bypassed by configuring Google Cloud Vertex AI via Application Default Credentials (`gcloud auth`), enabling enterprise quota access.
+2. **VirtioFS Synchronization Errors:** macOS Docker file synchronization caused the ToolMaker framework to fail directory destruction locks. This was resolved by modifying the Python CLI to empty the directory contents dynamically rather than forcefully deleting the volume root.
+3. **Docker SDK Incompatibilities:** The pipeline crashed with `404 ImageNotFound` errors because the Python Docker SDK failed to query images from Docker Desktop's newer `containerd` backend. We successfully patched `toolarena/runtime.py` to use a fallback `client.images.list()` loop.
+4. **Local Storage Exhaustion:** Iterative Docker image building overwhelmed the local SSD, requiring hard purges of the Docker environment mid-experiment.
+5. **Backtrader Metaclass Crashes:** The Backtrader framework suffered from an infamous `KeyError` when dynamically executing custom classes via `exec`. The agent independently resolved this by injecting `__module__ = '__main__'`.
+6. **The "Graceful Degradation" Test Failure Loophole:** The tools passed all generative ToolMaker checks but failed the rigid `pytest` suites. The agent naturally programmed "graceful degradation" (e.g., catching errors broadly and returning empty dictionaries) rather than explicitly throwing the structural `ValueErrors` expected by traditional testing.
+
+---
+
+## Future Steps
+1. **Prompt Engineering Refinement:** Explicitly modify the ToolMaker instruction prompt to demand strict exception validation (e.g., forcing the agent to `raise ValueError` upon encountering bad types or logical impossibilities).
+2. **Harden Sandbox Pathing constraints:** Remove access to internal library test data inside the Docker image (like `/workspace/Riskfolio-Lib`) to prevent the LLM from cheating mock-data tests via hardcoded fallbacks.
+3. **Expanded Synthetic Baselines:** Increase the baseline synthetic data generation from 50 rows to 500+ rows so that strategies like 30-day Moving Average crossovers have enough runway to generate meaningful trades in test environments.
+4. **Deploy Medical Baseline:** Initialize and configure the execution for `task_medical_baseline` to validate if the agent generalizes these solutions outside of the financial domain.
